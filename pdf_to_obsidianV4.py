@@ -7,6 +7,13 @@ import io
 import hashlib
 import sys
 
+# 强制设置标准输出为UTF-8编码（解决Windows cmd下emoji无法打印的问题）
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 # =====================================================================
 # 模块 1：网络环境强力净化 (防止 10054 / 10053 报错)
 # =====================================================================
@@ -21,20 +28,10 @@ os.environ['ALL_PROXY'] = ''
 # 模块 2：用户全局配置区
 # =====================================================================
 # ⚠️ 必须替换为你官网上申请的真实 API Token！
-TOKEN = "替换成你的MinerU的TOKEN" 
-
-# 🚀 极简双模输入引擎：优先读取命令行参数，否则回退到手动输入
-if len(sys.argv) > 1:
-    raw_path = sys.argv[1]
-    print(f"📥 [自动模式] 已接收到传入路径: {raw_path}")
-else:
-    print("💡 提示：你可以输入...\n  1. 单个 PDF 路径\n  2. 包含多个 PDF 的文件夹路径\n  3. 包含多个 PDF 路径的 TXT 文本文件路径")
-    raw_path = input("👉 请在此处粘贴路径 (然后按回车): ")
-
-INPUT_PATH = raw_path.strip('"').strip("'")
+TOKEN = "换成你的api token" 
 
 # 解析结果的保存目标位置
-SAVE_DIR = r"H:\ObsidianVaults\Literature\文献笔记" #替换成你的Obisidian中的文献笔记保存路径
+SAVE_DIR = r"H:\ObsidianVaults\Literature\文献笔记" #换成你的保存路径
 
 # V4 API 接口地址
 BASE_URL = "https://mineru.net/api/v4"
@@ -175,7 +172,6 @@ def save_to_obsidian(pdf_file_path):
     md_text, images_raw = result_tuple
     
     # 💡 核心极简：根据 PDF 文件的完整路径生成一个独一无二的 6 位短哈希，作为图片前缀
-    # 这样就算同一篇文献，换个 PDF 名字重新解析，图片前缀也会不一样，绝对防止冲突
     pdf_path_hash = hashlib.md5(pdf_file_path.encode('utf-8')).hexdigest()[:6]
     
     assets_dir = os.path.join(SAVE_DIR, "assets")
@@ -233,8 +229,8 @@ title: "{base_name}"
 year: {year}
 tags:
   - #文献笔记
-  - #矿床学
-  - #成因机制
+  - #伟晶岩
+  - #Li矿化
 status: 🟢已解析
 ---
 
@@ -242,47 +238,94 @@ status: 🟢已解析
     with open(output_path, "w", encoding="utf-8") as md_file:
         md_file.write(yaml_frontmatter + md_text)
 
+    # 给 Claudian 插件抓取的双链回显
+    print(f"[[文献笔记/{base_name}.md]]")
     print("-" * 40)
     print(f"🎯 任务大满贯！文件名已极简化，且 Obsidian 显示率 100%: {output_path}")
 
 # =====================================================================
-# 🚀 模块 6：批量任务调度器
+# 🚀 模块 6：智能输入引擎与批量任务调度器
 # =====================================================================
 if __name__ == "__main__":
-    pdf_tasks = []
+    raw_inputs = []
 
-    if os.path.isdir(INPUT_PATH):
-        print(f"\n📂 检测到文件夹输入，扫描中...")
-        for file in os.listdir(INPUT_PATH):
-            if file.lower().endswith(".pdf"):
-                pdf_tasks.append(os.path.join(INPUT_PATH, file))
-    elif os.path.isfile(INPUT_PATH) and INPUT_PATH.lower().endswith(".txt"):
-        print(f"\n📝 检测到 TXT 列表，读取中...")
-        with open(INPUT_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                clean_path = line.strip().strip('"').strip("'")
-                if clean_path and os.path.isfile(clean_path) and clean_path.lower().endswith(".pdf"):
-                    pdf_tasks.append(clean_path)
-    elif os.path.isfile(INPUT_PATH) and INPUT_PATH.lower().endswith(".pdf"):
-        print(f"\n📄 检测到单文件输入。")
-        pdf_tasks.append(INPUT_PATH)
+    # 1. 接收输入（支持命令行或手动粘贴）
+    if len(sys.argv) > 1:
+        raw_inputs = sys.argv[1:]
+        print(f"📥 [自动模式] 已接收到外部传入的参数...")
     else:
-        print("\n❌ 错误：输入无效。")
-        exit()
+        print("💡 提示：你可以输入以下任意一种：")
+        print("  1. 单个或多个 PDF 路径（直接粘贴即可，支持换行或空格分隔）")
+        print("  2. 包含多个 PDF 的文件夹路径")
+        print("  3. 包含多个 PDF 路径的 TXT 文本文件路径")
+        print("  👉 输入完成后，按两下回车结束：")
+        while True:
+            try:
+                line = input()
+                if line.strip() == "":
+                    break
+                raw_inputs.append(line)
+            except EOFError:
+                break
 
-    total_files = len(pdf_tasks)
+    # 2. 暴力清洗与拆分（应对换行、空格、引号混杂的极端情况）
+    pdf_tasks = []
+    for item in raw_inputs:
+        for line in item.splitlines():
+            line = line.strip().strip('"').strip("'").strip()
+            if not line:
+                continue
+            
+            if ".pdf " in line.lower() or ".pdf\"" in line.lower():
+                parts = line.replace(".pdf ", ".pdf|").replace(".PDF ", ".PDF|").split("|")
+                for p in parts:
+                    clean_p = p.strip().strip('"').strip("'").strip()
+                    if clean_p:
+                        pdf_tasks.append(clean_p)
+            else:
+                pdf_tasks.append(line)
+
+    # 3. 解析输入类型并生成真正的任务池
+    final_tasks = []
+    for target in pdf_tasks:
+        if os.path.isdir(target):
+            print(f"📂 识别为【文件夹】，正在提取内部 PDF...")
+            for file in os.listdir(target):
+                if file.lower().endswith(".pdf"):
+                    final_tasks.append(os.path.join(target, file))
+                    
+        elif target.lower().endswith(".txt") and os.path.isfile(target):
+            print(f"📝 识别为【TXT 列表】，正在读取文献路径...")
+            with open(target, "r", encoding="utf-8") as f:
+                for line in f:
+                    clean_path = line.strip().strip('"').strip("'")
+                    if clean_path.lower().endswith(".pdf") and os.path.isfile(clean_path):
+                        final_tasks.append(clean_path)
+                        
+        elif target.lower().endswith(".pdf") and os.path.isfile(target):
+            final_tasks.append(target)
+            
+        else:
+            print(f"⚠️ 忽略无效路径或文件不存在 -> {target}")
+
+    # 4. 去除重复文献，防止二次提交
+    final_tasks = list(dict.fromkeys(final_tasks))
+
+    # 5. 开始批量执行
+    total_files = len(final_tasks)
     if total_files == 0:
-        print("📭 没有找到有效的 PDF 任务。")
+        print("\n📭 没有找到任何有效的 PDF 任务，程序退出。")
         exit()
 
-    print(f"🔥 共 {total_files} 篇文献。V4 极简离线版启动！\n" + "="*50)
+    print(f"\n🔥 共提取到 {total_files} 篇待解析文献。V4 全要素解析启动！\n" + "="*50)
 
-    for index, pdf_path in enumerate(pdf_tasks, start=1):
+    for index, pdf_path in enumerate(final_tasks, start=1):
         print(f"\n▶️ [进度 {index}/{total_files}] 处理文献: {os.path.basename(pdf_path)}")
         save_to_obsidian(pdf_path)
         
         if index < total_files:
-            time.sleep(3) # ☕
+            print("☕ 休息 3 秒钟后继续下一篇，防止触发服务器流控...")
+            time.sleep(3)
 
     print("\n" + "="*50)
     print("🏆 批量任务完成！快去 Obsidian 看看那些原生双链渲染出来的极简图表吧！")
