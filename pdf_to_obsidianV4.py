@@ -229,8 +229,8 @@ title: "{base_name}"
 year: {year}
 tags:
   - #文献笔记
-  - #伟晶岩
-  - #Li矿化
+  - #矿床学
+  - #成因机制
 status: 🟢已解析
 ---
 
